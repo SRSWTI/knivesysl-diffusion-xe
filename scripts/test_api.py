@@ -21,7 +21,7 @@ def post(base, path, payload, timeout=600):
 
 
 def stream_chat(base, prompt, max_tokens=256, thinking=False, model="diffusiongemma-w4a16"):
-    payload = {"model": "diffusiongemma-w4a16",
+    payload = {"model": "knivesysl-diffusion-xe",
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": max_tokens, "stream": True,
                "stream_options": {"include_usage": True}}
@@ -78,7 +78,7 @@ def stream_chat(base, prompt, max_tokens=256, thinking=False, model="diffusionge
 
 
 def nonstream_chat(base, prompt, max_tokens=256, thinking=False):
-    payload = {"model": "diffusiongemma-w4a16",
+    payload = {"model": "knivesysl-diffusion-xe",
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": max_tokens, "thinking": thinking}
     req = urllib.request.Request(base + "/v1/chat/completions",

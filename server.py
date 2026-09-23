@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 REPO = "GoedelMachines/diffusiongemma-26B-A4B-w4a16"
 REVISION = "0fede6e3e65d258d444822cfb6a79092cdc5c0af"
-SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "diffusiongemma-w4a16")
+SERVED_MODEL_NAME = os.environ.get("SERVED_MODEL_NAME", "knivesysl-diffusion-xe")
 NVIDIA_BASE_URL = os.environ.get(
     "NVIDIA_BASE_URL",
     "http://172.17.0.1:8000" if Path("/.dockerenv").exists() else "http://127.0.0.1:8000",

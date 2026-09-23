@@ -25,7 +25,7 @@ services:
       - "${AXE_PORT:-8080}:8080"
     environment:
       - LOAD_LOCAL=1
-      - SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-diffusiongemma-w4a16}
+      - SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-knivesysl-diffusion-xe}
       # NVIDIA backend of the studio proxies to this URL (optional; the
       # studio still works when the RTX 5090 server is down).
       - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-http://172.17.0.1:8000}
