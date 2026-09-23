@@ -3,14 +3,16 @@
 import copy
 import json
 from pathlib import Path
-import runpy
 import sys
 import time
 
 
 def main():
     data = json.loads(Path('/work/tests.json').read_text())
-    namespace = runpy.run_path('/work/subject.py', run_name='candidate')
+    namespace = {'__name__':'candidate', '__file__':'/work/subject.py'}
+    if data.get('environment'):
+        exec(compile(data['environment'], '<dataset-environment>', 'exec'), namespace)
+    exec(compile(Path('/work/subject.py').read_text(), '/work/subject.py', 'exec'), namespace)
     method = data['entry_point'].split('.',1)[1]
     candidate = getattr(namespace['Solution'](), method)
     passed = 0

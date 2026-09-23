@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!server.py
+!web.html
+!editor.html
+!kernels/
+!kernels/**
+**/__pycache__/
+**/*.pyc

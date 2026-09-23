@@ -1,4 +1,4 @@
-# AXE-Diffusion KSL-XE: GoedelMachines W4A16 diffusion server on a single
+# AXE-Diffusion KSL-XE: W4A16 diffusion server on a single
 # Intel Arc Pro B70 — Diffusion Studio UI + OpenAI-compatible API in one
 # process, one model load. Triton 3.8.0 XPU backend underneath.
 #
@@ -13,7 +13,7 @@ name: axe-diffusion-ksl-xe
 
 services:
   xe-diffusion:
-    image: ${AXE_IMAGE:-local/gemma-w4-intel:triton38}
+    image: ${AXE_IMAGE:-local/axe-diffusion-ksl-xe:triton38}
     container_name: axe-diffusion-ksl-xe
     entrypoint: python
     command: ["-u", "/app/server.py"]
@@ -25,17 +25,22 @@ services:
       - "${AXE_PORT:-8080}:8080"
     environment:
       - LOAD_LOCAL=1
-      - SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-knivesysl-diffusion-xe}
+      - SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-axe-diffusion-ksl-xe}
+      - AXE_REVISION=${AXE_REVISION:-main}
       # NVIDIA backend of the studio proxies to this URL (optional; the
       # studio still works when the RTX 5090 server is down).
       - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-http://172.17.0.1:8000}
       - NVIDIA_MODEL=${NVIDIA_MODEL:-RedHatAI/diffusiongemma-26B-A4B-it-NVFP4}
       - HF_HUB_OFFLINE=1
       - TOKENIZERS_PARALLELISM=false
+      - EDIT_CHECK_SOCKET=/run/axe-edit-checks/checks.sock
     volumes:
       - ${HF_HOME:-$HOME/.cache/huggingface}:/root/.cache/huggingface
       - ./server.py:/app/server.py:ro
       - ./web.html:/app/web.html:ro
+      - ./editor.html:/app/editor.html:ro
+      - ./kernels:/app/kernels:ro
+      - ./.cache/edit-checks:/run/axe-edit-checks:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).status==200 else 1)"]
       interval: 10s

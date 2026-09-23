@@ -72,7 +72,7 @@ class StreamerTests(unittest.TestCase):
     def test_real_tokenizer_preserves_literal_special_tokens(self):
         source = 'value = "<mask> <pad>"\n'
         request = EditRequest(code=source, instruction='Keep source.', mode='whole')
-        stream, _ = self.streamer(request, '<|channel>thought\n<channel|>' + source)
+        stream, _ = self.streamer(request, '<|channel>thought\n<channel|><replacement>' + source + '</replacement>')
         self.assertEqual(stream.final_source(), source)
 
     def test_unicode_crlf_selection_is_exact(self):
@@ -113,9 +113,27 @@ class StreamerTests(unittest.TestCase):
         request = EditRequest(code='x = 1\n', instruction='Revise.', mode='whole')
         for raw, eos, budget in [('x = 2\n', False, 100), ('x = 2\n', True, 1), ('def broken(', True, 100), ('', True, 100)]:
             with self.subTest(raw=raw, eos=eos, budget=budget):
-                stream, _ = self.streamer(request, raw, eos=eos, budget=budget)
+                stream, _ = self.streamer(request, '<replacement>' + raw + '</replacement>', eos=eos, budget=budget)
                 with self.assertRaises(ValueError):
                     stream.final_source()
+
+    def test_python_is_compiled_not_only_parsed(self):
+        request = EditRequest(code='x = 1\n', instruction='Revise.', mode='whole')
+        for invalid in ('return 1\n', 'break\n', 'nonlocal missing\n'):
+            with self.subTest(invalid=invalid):
+                stream, _ = self.streamer(request, '<replacement>' + invalid + '</replacement>')
+                with self.assertRaisesRegex(ValueError, 'not valid Python'):
+                    stream.final_source()
+
+    def test_whole_file_preserves_docstrings_and_literal_escapes(self):
+        source = '\"\"\"Module documentation.\"\"\"\npattern = r"\\n"\n'
+        request = EditRequest(code=source, instruction='Keep source.', mode='whole')
+        stream, _ = self.streamer(request, '<replacement>' + source + '</replacement>')
+        self.assertEqual(stream.final_source(), source)
+        broken = source.replace('\"\"\"\n', '\\\"\\\"\\\"\n')
+        stream, _ = self.streamer(request, '<replacement>' + broken + '</replacement>')
+        with self.assertRaises(ValueError):
+            stream.final_source()
 
     def test_final_validation_checks_assembled_document(self):
         source = 'def answer():\n    return 41\n'

@@ -26,6 +26,7 @@ CASES = ROOT / 'scripts' / 'edit_cases'
 STATE = ROOT / '.cache' / 'edit-checks'
 SOCKET = STATE / 'checks.sock'
 MANIFEST = {case['id']: case for case in json.loads((CASES / 'cases.json').read_text())}
+DATASET_RECORDS = json.loads((CASES / 'leetcode_records.json').read_text())
 CHECK_LOCK = threading.Lock()
 CUDA_ROOT = Path(shutil.which('nvcc') or '/usr/local/cuda/bin/nvcc').resolve().parent.parent
 
@@ -33,6 +34,8 @@ CUDA_ROOT = Path(shutil.which('nvcc') or '/usr/local/cuda/bin/nvcc').resolve().p
 def public_cases():
     result = []
     for case in MANIFEST.values():
+        if 'dataset_task' not in case:
+            continue  # Custom C++/CUDA cases are retained for a later evaluation.
         item = {key: value for key, value in case.items() if key not in ('reference', 'harness')}
         item['code'] = (CASES / case['file']).read_text()
         item['lines'] = len(item['code'].splitlines())
@@ -85,30 +88,32 @@ def execute(work, command, *, compile_phase=False, cuda=False):
             'seconds': round(time.perf_counter()-started, 4)}
 
 
-def check_code(case_id, code):
+def check_code(case_id, code, workflow='file'):
     STATE.mkdir(parents=True, exist_ok=True)
     with (STATE / 'execution.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _check_code(case_id, code)
+        return _check_code(case_id, code, workflow)
 
 
-def _check_code(case_id, code):
+def _check_code(case_id, code, workflow):
     if not isinstance(case_id, str) or case_id not in MANIFEST:
         raise ValueError('Unknown evaluation case')
     if not isinstance(code, str) or len(code) > 150000:
         raise ValueError('Source must be a string of at most 150000 characters')
     case = MANIFEST[case_id]
+    if workflow not in ('file', 'starter') or (workflow == 'starter' and 'dataset_task' not in case):
+        raise ValueError('Starter workflow is available only for dataset-backed Python cases')
     language = case['language']
     STATE.mkdir(parents=True, exist_ok=True)
-    result = {'case': case_id, 'language': language, 'source_sha256': hashlib.sha256(code.encode()).hexdigest()}
+    result = {'case': case_id, 'language': language, 'workflow':workflow, 'source_sha256': hashlib.sha256(code.encode()).hexdigest()}
     with tempfile.TemporaryDirectory(prefix='job-', dir=STATE) as temporary:
         work = Path(temporary)
         suffix = {'python': '.py', 'cpp': '.hpp', 'cuda': '.cuh'}[language]
         (work / ('subject'+suffix)).write_text(code)
         if language == 'python':
-            records = json.loads((CASES / 'leetcode_records.json').read_text())
-            record = records[case['dataset_task']]
-            (work / 'tests.json').write_text(json.dumps({'task_id':case['dataset_task'], 'entry_point':record['entry_point'], 'tests':record['tests']}))
+            record = DATASET_RECORDS[case['dataset_task']]
+            (work / 'tests.json').write_text(json.dumps({'task_id':case['dataset_task'], 'entry_point':record['entry_point'],
+                'tests':record['tests'], 'environment':record['environment'] if workflow == 'starter' else ''}))
             shutil.copyfile(CASES / 'check_dataset.py', work / 'check.py')
             compile_command = ['/usr/bin/python3', '-I', '-m', 'py_compile', '/work/subject.py']
             run_command = ['/usr/bin/python3', '-I', '/work/check.py']
@@ -211,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(409, {'error':'Another compile/run check is in progress'})
             return
         try:
-            result = check_code(payload.get('case'), payload.get('code'))
+            result = check_code(payload.get('case'), payload.get('code'), payload.get('workflow', 'file'))
             self.reply(200, result)
         except ValueError as error:
             self.reply(400, {'error':str(error)})
@@ -245,7 +250,7 @@ def start_service():
         return
     except (OSError, RuntimeError):
         pass
-    for binary in ('bwrap','g++','nvcc'):
+    for binary in ('bwrap', 'python3'):
         if not shutil.which(binary):
             raise RuntimeError(f'{binary} is required for the configured evaluation cases')
     STATE.mkdir(parents=True, exist_ok=True)
@@ -263,15 +268,21 @@ def start_service():
     raise RuntimeError('Timed out starting check service')
 
 
-def evaluate(base, output, selected=None):
+def evaluate(base, output, selected=None, starter=False):
     output.mkdir(parents=True, exist_ok=True)
     report = {'model': json.load(urllib.request.urlopen(base+'/v1/models')), 'started':time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-              'attempts_per_condition':1, 'dataset':'newfacade/LeetCodeDataset', 'cases':[], 'controls':[]}
-    chosen = [case for case in MANIFEST.values() if not selected or case['id'] in selected]
+              'attempts_per_condition':1, 'workflow':'starter' if starter else 'file',
+              'dataset':'newfacade/LeetCodeDataset', 'cases':[], 'controls':[]}
+    chosen = [case for case in MANIFEST.values() if (case['id'] in selected if selected else 'dataset_task' in case)]
+    if starter:
+        chosen = [case for case in chosen if 'dataset_task' in case]
+    workflow = 'starter' if starter else 'file'
     for case in chosen:
-        original = (CASES / case['file']).read_text()
-        baseline = check_code(case['id'], original)
-        reference = check_code(case['id'], case['reference'])
+        original = case['starter_code'] if starter else (CASES / case['file']).read_text()
+        start, end = (0, len(original)) if starter else (case['selection_start'], case['selection_end'])
+        prompts = {'statement':case['starter_instruction']} if starter else case['prompts']
+        baseline = check_code(case['id'], original, workflow)
+        reference = check_code(case['id'], case['reference'], workflow)
         control = {'case':case['id'],'original':baseline,'reference':reference}
         report['controls'].append(control)
         (output/'report.json').write_text(json.dumps(report,indent=2))
@@ -281,15 +292,15 @@ def evaluate(base, output, selected=None):
         if baseline['status'] == 'pass':
             raise RuntimeError(f"Original fixture unexpectedly passes for {case['id']}")
         for mode in ('selection','whole'):
-            for specificity in ('vague','detailed'):
+            for specificity, instruction in prompts.items():
                 name = f"{case['id']}--{mode}--{specificity}"
                 directory = output/name
                 directory.mkdir()
-                payload = {'code':original,'instruction':case['prompts'][specificity], 'language':case['language'], 'mode':mode, 'max_tokens':8192}
+                payload = {'code':original,'instruction':instruction, 'language':case['language'], 'mode':mode, 'max_tokens':8192}
                 if mode == 'selection':
-                    payload.update(selection_start=case['selection_start'],selection_end=case['selection_end'])
+                    payload.update(selection_start=start,selection_end=end)
                 (directory/'request.json').write_text(json.dumps(payload,indent=2))
-                result = {'case':case['id'],'mode':mode,'specificity':specificity,'original_lines':len(original.splitlines()),'directory':str(directory)}
+                result = {'case':case['id'],'mode':mode,'workflow':workflow,'specificity':specificity,'original_lines':len(original.splitlines()),'directory':str(directory)}
                 started = time.perf_counter()
                 terminal = None
                 final = None
@@ -302,8 +313,8 @@ def evaluate(base, output, selected=None):
                             event = json.loads(line[6:])
                             log.write(json.dumps(event)+'\n')
                             if mode == 'selection' and 'code' in event:
-                                prefix = original[:case['selection_start']]
-                                suffix = original[case['selection_end']:]
+                                prefix = original[:start]
+                                suffix = original[end:]
                                 preserved &= event['code'].startswith(prefix) and event['code'].endswith(suffix) and len(event['code'])>=len(prefix)+len(suffix)
                             if event['type'] in ('done','error'): terminal=event
                             if event['type']=='done': final=event['code']
@@ -314,7 +325,7 @@ def evaluate(base, output, selected=None):
                         result['status']='boundary_failure'
                     else:
                         (directory/case['file']).write_text(final)
-                        result['check']=check_code(case['id'],final)
+                        result['check']=check_code(case['id'],final,workflow)
                         result['status']=result['check']['status']
                         import difflib
                         result['changed_lines']=sum(line.startswith(('+','-')) and not line.startswith(('+++','---')) for line in difflib.unified_diff(original.splitlines(),final.splitlines()))
@@ -337,6 +348,7 @@ def main():
     parser.add_argument('--output',type=Path)
     parser.add_argument('--case',action='append')
     parser.add_argument('--source',type=Path)
+    parser.add_argument('--starter', action='store_true', help='Use the exact dataset starter + full statement, with its Python environment')
     args=parser.parse_args()
     if args.command=='start': start_service()
     elif args.command=='serve': serve()
@@ -345,14 +357,18 @@ def main():
         except OSError: print('Check service is not running')
     elif args.command=='check':
         if not args.case or len(args.case)!=1 or not args.source: parser.error('check requires one --case and --source')
-        print(json.dumps(check_code(args.case[0],args.source.read_text()),indent=2))
+        print(json.dumps(check_code(args.case[0],args.source.read_text(),'starter' if args.starter else 'file'),indent=2))
     elif args.command=='controls':
         for case in MANIFEST.values():
             if args.case and case['id'] not in args.case: continue
-            print(json.dumps({'case':case['id'],'original':check_code(case['id'],(CASES/case['file']).read_text()),'reference':check_code(case['id'],case['reference'])},indent=2),flush=True)
+            if not args.case and 'dataset_task' not in case: continue
+            if args.starter and 'dataset_task' not in case: continue
+            source = case['starter_code'] if args.starter else (CASES/case['file']).read_text()
+            workflow = 'starter' if args.starter else 'file'
+            print(json.dumps({'case':case['id'],'original':check_code(case['id'],source,workflow),'reference':check_code(case['id'],case['reference'],workflow)},indent=2),flush=True)
     else:
         output=args.output or ROOT/'artifacts'/('editing-eval-'+time.strftime('%Y%m%d-%H%M%S'))
-        evaluate(args.base.rstrip('/'),output,args.case)
+        evaluate(args.base.rstrip('/'),output,args.case,args.starter)
         print(f'Report: {output / "report.json"}')
 
 

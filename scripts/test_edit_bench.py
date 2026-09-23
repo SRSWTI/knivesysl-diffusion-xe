@@ -12,10 +12,13 @@ from scripts import edit_bench as bench
 class CheckerTests(unittest.TestCase):
     def test_public_examples_exclude_reference_answers(self):
         examples = bench.public_cases()
-        self.assertEqual(len(examples), 7)
+        self.assertTrue(examples)
         for case in examples:
             self.assertNotIn('reference', case)
             self.assertNotIn('harness', case)
+            self.assertIn('dataset_task', case)
+            self.assertEqual(case['language'], 'python')
+            self.assertIn('starter_code', case)
             self.assertGreater(case['selection_end'], case['selection_start'])
             self.assertLessEqual(case['selection_end'], len(case['code']))
             self.assertNotEqual(case['prompts']['vague'], case['prompts']['detailed'])
@@ -24,7 +27,7 @@ class CheckerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bench.check_code('../server.py', 'int main() {}')
         with self.assertRaises(ValueError):
-            bench.check_code('intervals', 'x' * 150001)
+            bench.check_code('two-sum', 'x' * 150001)
         with self.assertRaises(ValueError):
             bench.check_code([], '')
 
@@ -73,6 +76,15 @@ print('ISOLATION_OK')
         self.assertEqual(result['returncode'], 0, result)
         self.assertIn('ISOLATION_OK', result['output'])
 
+    def test_zero_exit_without_tests_is_not_a_pass(self):
+        result = bench.check_code('two-sum', 'raise SystemExit(0)\n')
+        self.assertEqual(result['run']['returncode'], 0)
+        self.assertEqual(result['status'], 'invalid_test_result')
+        source = '#include <cstdlib>\nstatic int premature = (std::exit(0), 0);\n' + bench.MANIFEST['intervals']['reference']
+        result = bench.check_code('intervals', source)
+        self.assertEqual(result['run']['returncode'], 0)
+        self.assertEqual(result['status'], 'invalid_test_result')
+
     def test_hung_process_is_killed_at_wall_deadline(self):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
@@ -83,6 +95,31 @@ print('ISOLATION_OK')
         self.assertTrue(result['timeout'], result)
         self.assertNotEqual(result['returncode'], 0)
         self.assertLess(elapsed, 75)
+
+
+class LeetCodeCheckerTests(unittest.TestCase):
+    def test_python_compile_failure_stops_before_execution(self):
+        result = bench.check_code('two-sum', 'def broken(:\n')
+        self.assertEqual(result['status'], 'compile_error')
+        self.assertNotIn('run', result)
+
+    def test_zero_exit_without_dataset_checks_is_not_a_pass(self):
+        result = bench.check_code('two-sum', 'raise SystemExit(0)\n', 'starter')
+        self.assertEqual(result['run']['returncode'], 0)
+        self.assertEqual(result['status'], 'invalid_test_result')
+
+    def test_starter_uses_the_supplied_dataset_environment(self):
+        reference = bench.DATASET_RECORDS['sliding-window-maximum']['reference']
+        solution = 'class Solution:' + reference.split('class Solution:', 1)[1]
+        standalone = bench.check_code('sliding-window-maximum', solution, 'file')
+        with_environment = bench.check_code('sliding-window-maximum', solution, 'starter')
+        self.assertEqual(standalone['status'], 'test_failure')
+        self.assertEqual(with_environment['status'], 'pass')
+        self.assertEqual(with_environment['tests']['passed'], with_environment['tests']['total'])
+
+    def test_unknown_workflow_is_rejected(self):
+        with self.assertRaises(ValueError):
+            bench.check_code('two-sum', 'pass', 'unknown')
 
 
 if __name__ == '__main__':

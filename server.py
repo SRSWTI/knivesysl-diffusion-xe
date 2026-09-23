@@ -418,6 +418,7 @@ async def edit_code(body: EditRequest, request: Request):
 class CodeCheckRequest(BaseModel):
     case: str = Field(min_length=1, max_length=80)
     code: str = Field(max_length=150000)
+    workflow: Literal["file", "starter"] = "file"
 
 
 async def check_service(method, path, payload=None):
