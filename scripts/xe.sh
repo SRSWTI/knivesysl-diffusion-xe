@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# AXE-Diffusion KSL-XE — lifecycle for the GoedelMachines W4A16 diffusion
-# server (Diffusion Studio UI + OpenAI-compatible API in one process).
+# AXE-Diffusion KSL-XE — lifecycle for the W4A16 diffusion server
+# (Diffusion Studio UI + OpenAI-compatible API in one process).
 #
-#   ./scripts/xe.sh up        start + wait for /health (model load ~18 s)
+#   ./scripts/xe.sh up        build image if missing, fetch the AXE
+#                             checkpoint, start + wait for /health
+#   ./scripts/xe.sh fetch     prefetch srswti/axe-diffusion-ksl-xe into the
+#                             HF cache (revision ${AXE_REVISION:-main})
 #   ./scripts/xe.sh down      stop and remove the container
 #   ./scripts/xe.sh restart   down + up
 #   ./scripts/xe.sh status    container + GPU memory + health + /v1/models
@@ -10,16 +13,19 @@
 #   ./scripts/xe.sh gpu       xpu-smi snapshot
 #   ./scripts/xe.sh test      python3 scripts/test_api.py  (needs server up)
 #
-# Env overrides: AXE_PORT (default 8080), AXE_IMAGE, SERVED_MODEL_NAME.
+# Env overrides: AXE_PORT (default 8080), AXE_IMAGE, AXE_BASE_IMAGE,
+# AXE_REVISION (default main), SERVED_MODEL_NAME, HF_HOME.
 # GPU pinning: the app binds xpu:0 (= level_zero device 0, the FIRST Intel GPU).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IMAGE="${AXE_IMAGE:-local/gemma-w4-intel:triton38}"
+IMAGE="${AXE_IMAGE:-local/axe-diffusion-ksl-xe:triton38}"
 BASE_IMAGE="${AXE_BASE_IMAGE:-local/gemma-w4-intel:tested}"
 PORT="${AXE_PORT:-8080}"
 NAME="axe-diffusion-ksl-xe"
+AXE_REVISION="${AXE_REVISION:-main}"
+HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 
 ensure_image() {
   if docker image inspect "$IMAGE" >/dev/null 2>&1; then
@@ -27,22 +33,31 @@ ensure_image() {
     return
   fi
   echo "== building $IMAGE from $BASE_IMAGE (Triton 3.8.0 XPU upgrade)"
-  docker rm -f xe-imgbuild >/dev/null 2>&1 || true
-  docker run --name xe-imgbuild --entrypoint bash "$BASE_IMAGE" -c \
-    "pip install --no-cache-dir 'triton-xpu==3.8.0' --index-url https://download.pytorch.org/whl/xpu"
-  docker commit xe-imgbuild "$IMAGE"
-  docker rm xe-imgbuild >/dev/null
-  echo "== committed $IMAGE"
+  docker build --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE" .
+  echo "== built $IMAGE"
+}
+
+fetch() {
+  echo "== fetching srswti/axe-diffusion-ksl-xe (revision ${AXE_REVISION}) =="
+  # Weights + config only — local kernels/ are never overwritten from remote.
+  hf download srswti/axe-diffusion-ksl-xe \
+    --revision "${AXE_REVISION}" \
+    --include '*.safetensors' --include '*.json' --include '*.jinja' \
+    --cache-dir "${HF_CACHE_DIR}"
 }
 
 up() {
   ensure_image
+  fetch
+  if [ "${AXE_CHECKS:-1}" = "1" ]; then
+    python3 scripts/edit_bench.py start
+  fi
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker compose up -d
   ./scripts/xe.sh wait
 }
 
-down()   { docker compose down; }
+down() { docker compose down; python3 scripts/edit_bench.py stop; }
 status() {
   echo "== container =="
   docker ps -a --filter "name=$NAME" --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
@@ -71,6 +86,7 @@ wait() {
 
 case "${1:-}" in
   up) up ;;
+  fetch) fetch ;;
   down) down ;;
   restart) down; up ;;
   status) status ;;
@@ -78,5 +94,7 @@ case "${1:-}" in
   gpu) gpu ;;
   wait) wait ;;
   test) python3 scripts/test_api.py --base "http://127.0.0.1:${PORT}" ;;
-  *) echo "usage: $0 {up|down|restart|status|logs|wait|gpu|test}"; exit 2 ;;
+  checks) python3 scripts/edit_bench.py start ;;
+  eval) python3 scripts/edit_bench.py run --base "http://127.0.0.1:${PORT}" ;;
+  *) echo "usage: $0 {up|fetch|down|restart|status|logs|wait|gpu|test|checks|eval}"; exit 2 ;;
 esac

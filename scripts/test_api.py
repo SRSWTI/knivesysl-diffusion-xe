@@ -9,9 +9,12 @@ usage: python3 scripts/test_api.py [--base http://127.0.0.1:8080]
 """
 import argparse
 import json
+import os
 import time
 import urllib.error
 import urllib.request
+
+MODEL = os.environ.get("SERVED_MODEL_NAME", "axe-diffusion-ksl-xe")
 
 
 def post(base, path, payload, timeout=600):
@@ -20,8 +23,8 @@ def post(base, path, payload, timeout=600):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
-def stream_chat(base, prompt, max_tokens=256, thinking=False, model="diffusiongemma-w4a16"):
-    payload = {"model": "knivesysl-diffusion-xe",
+def stream_chat(base, prompt, max_tokens=256, thinking=False, model=MODEL):
+    payload = {"model": model,
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": max_tokens, "stream": True,
                "stream_options": {"include_usage": True}}
@@ -78,7 +81,7 @@ def stream_chat(base, prompt, max_tokens=256, thinking=False, model="diffusionge
 
 
 def nonstream_chat(base, prompt, max_tokens=256, thinking=False):
-    payload = {"model": "knivesysl-diffusion-xe",
+    payload = {"model": MODEL,
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": max_tokens, "thinking": thinking}
     req = urllib.request.Request(base + "/v1/chat/completions",
@@ -101,7 +104,7 @@ def nonstream_chat(base, prompt, max_tokens=256, thinking=False):
     return {"e2e": e2e, "content": ch["message"]["content"],
             "reasoning": ch["message"].get("reasoning_content", ""),
             "finish": ch["finish_reason"], "usage": data["usage"],
-            "knivesys_meta": data.get("axe")}
+            "axe_meta": data.get("axe")}
 
 
 QUALITY = [
@@ -163,6 +166,8 @@ def main():
     print(f"  finish={r['finish'] if 'finish' in r else ''} completion_tokens={r['usage']['completion_tokens']}")
 
     print("\nALL CHECKS DONE")
+    if ok != len(QUALITY):
+        raise SystemExit("Quality checks failed")
 
 
 if __name__ == "__main__":
