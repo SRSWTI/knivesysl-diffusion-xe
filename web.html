@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AXE-Diffusion KSL-XE Studio · Intel + NVIDIA</title>
+<style>
+:root{color-scheme:dark;--bg:#101416;--panel:#191f22;--line:#303a3e;--muted:#9aaeb5;--ink:#e7eeed;--accent:#bbf399;--draft:#f3ce82}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,sans-serif}button,textarea,select{font:inherit}button,select{cursor:pointer}header{border-bottom:1px solid var(--line);padding:24px 5vw;display:flex;justify-content:space-between;align-items:center;gap:20px}.brand{font-size:19px;font-weight:650;letter-spacing:-.5px}.brand small{display:block;color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:400}.badge{font:12px ui-monospace,monospace;color:var(--accent);border:1px solid #49643d;border-radius:30px;padding:6px 13px}main{max-width:1040px;margin:auto;padding:40px 24px 210px}.eyebrow{color:var(--accent);font-size:11px;letter-spacing:2px;text-transform:uppercase}h1{font-size:clamp(32px,5vw,54px);line-height:1.1;letter-spacing:-2px;font-weight:500;margin:18px 0}p{color:var(--muted);max-width:650px}.intro{padding:22px 0 32px}.suggestions{display:flex;gap:10px;flex-wrap:wrap}.suggestions button{border:1px solid var(--line);background:transparent;color:var(--ink);padding:10px 15px;border-radius:8px;text-align:left}.suggestions button:hover{border-color:var(--accent)}.turn{margin:28px 0;border-top:1px solid var(--line);padding-top:22px}.turn.user{margin-left:15%;border:0;border-radius:12px;background:var(--panel);padding:16px 22px}.label{font-size:10px;letter-spacing:1.8px;text-transform:uppercase;color:var(--muted);margin-bottom:12px}.answer,.reasoning{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace}.answer.drafting{color:var(--draft)}.revision{animation:resolve .45s ease-out}.answer.settled{animation:settle .5s ease-out}@keyframes resolve{from{background:#f3ce8233;filter:blur(1px)}to{background:transparent;filter:blur(0)}}@keyframes settle{from{color:var(--accent)}to{color:var(--ink)}}details{margin:12px 0;padding:12px 16px;border-left:2px solid #647553;background:#162019}summary{cursor:pointer;color:var(--accent);font-size:12px}.reasoning{font-size:13px;color:#b9c9b3}.status,.stats{font:11px/1.6 ui-monospace,monospace;color:var(--muted);margin-top:14px}.status.active{color:var(--draft)}.status.active:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--draft);margin-right:8px;animation:pulse 1s infinite}@keyframes pulse{50%{opacity:.3}}.composer-wrap{position:fixed;bottom:0;left:0;right:0;padding:12px 24px 22px;background:linear-gradient(transparent,var(--bg) 12%)}.composer{max-width:992px;margin:auto;background:var(--panel);border:1px solid #45534b;border-radius:14px;padding:14px 18px;box-shadow:0 12px 60px #0005}textarea{resize:vertical;min-height:60px;max-height:180px;width:100%;color:var(--ink);background:none;border:0;outline:none;line-height:1.5}textarea:focus-visible{outline:1px solid var(--accent);outline-offset:4px;border-radius:3px}.controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;font-size:12px;color:var(--muted)}select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:4px}input{accent-color:var(--accent)}.spacer{flex:1}button{transition:border-color .2s,background .2s}button:disabled{opacity:.5;cursor:not-allowed}.primary{background:var(--accent);color:#15200e;font-weight:650;border:0;border-radius:7px;padding:8px 20px}.secondary{background:none;color:var(--muted);border:1px solid var(--line);border-radius:7px;padding:7px 12px}.hint{text-align:center;font-size:10px;color:var(--muted);margin:7px 0 0}.error{color:#ffb3a9}.hidden{display:none!important}@media(prefers-reduced-motion:reduce){*,*:before{animation:none!important}}@media(max-width:600px){header{padding:18px 20px}.badge{font-size:10px}main{padding:20px 18px 240px}.composer-wrap{padding:10px}.controls{gap:10px}.turn.user{margin-left:5%}}
+</style>
+</head>
+<body>
+<header><div class="brand">Diffusion Studio<small id="model-label">Gemma 26B · W4A16 · Intel XPU</small></div><span class="badge" id="health">Connecting…</span></header>
+<main><section class="intro" id="intro"><div class="eyebrow">Watch an answer take shape</div><h1>Not one token at a time.</h1><p id="stream-description">Intel shows real revisable diffusion drafts. NVIDIA streams committed output from vLLM, not intermediate denoising drafts.</p><div class="suggestions"><button data-prompt="Explain how diffusion language models work in three short paragraphs.">Explain diffusion</button><button data-prompt="Write a Python function that finds the longest substring without repeated characters. Explain the algorithm.">Write some code</button><button data-prompt="A box has twice as many red balls as blue balls. Removing 6 red and adding 3 blue makes the counts equal. How many balls were there originally?">Try a reasoning problem</button></div></section><section id="conversation" aria-label="Conversation"></section></main>
+<div class="composer-wrap"><form class="composer" id="form"><textarea id="prompt" aria-label="Your message" placeholder="Ask Intel Gemma something…" required></textarea><div class="controls"><label>Backend <select id="backend"><option value="intel">Intel · live drafts</option><option value="nvidia">NVIDIA · RTX 5090</option></select></label><label><input type="checkbox" id="thinking"> Thinking</label><label>Output <select id="tokens"><option>256</option><option selected>512</option><option>1024</option><option>2048</option><option>4096</option><option>8192</option></select></label><button type="button" class="secondary" id="clear">New chat</button><span class="spacer"></span><button type="button" class="secondary hidden" id="stop">Stop</button><button class="primary" id="send">Send</button></div></form><div class="hint" id="mode-hint">Intel: live revisable drafts · Separate conversation per backend · Enter to send · Shift + Enter for newline</div></div>
+<script>
+const $ = id => document.getElementById(id);
+let backend = 'intel', controller = null, busy = false;
+const histories = {intel: [], nvidia: []};
+const views = {intel: document.createElement('div'), nvidia: document.createElement('div')};
+$('conversation').append(views.intel);
+function node(tag, cls, text) {const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el}
+function revise(el,text,draft){const previous=el.textContent;if(previous===text)return;let n=0;while(n<previous.length&&n<text.length&&previous[n]===text[n])n++;el.replaceChildren(document.createTextNode(text.slice(0,n)));el.append(node('span',draft?'revision':'',text.slice(n)))}
+function setBusy(value){busy=value;for(const id of ['send','clear','thinking','tokens','backend'])$(id).disabled=value;$('stop').classList.toggle('hidden',!value)}
+function scrollIfNearBottom(){if(document.documentElement.scrollHeight-innerHeight-scrollY<350)scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'})}
+async function health(){const selected=backend;try{const r=await fetch('/health?backend='+selected);if(!r.ok)throw Error();const h=await r.json();if(selected!==backend)return;$('health').textContent=selected.toUpperCase()+(h.ready?(h.busy||busy?' · GENERATING':' · READY'):' · UNAVAILABLE')}catch{if(selected===backend)$('health').textContent=selected.toUpperCase()+' · OFFLINE'}}
+$('backend').onchange=()=>{
+  backend=$('backend').value;
+  $('conversation').replaceChildren(views[backend]);
+  $('intro').classList.toggle('hidden',views[backend].hasChildNodes());
+  $('model-label').textContent={intel:'Gemma 26B · W4A16 · Intel XPU',nvidia:'Gemma 26B · NVFP4 · NVIDIA RTX 5090'}[backend];
+  $('prompt').placeholder=`Ask ${backend==='intel'?'Intel':'NVIDIA'} Gemma something…`;
+  $('mode-hint').textContent=(backend==='intel'?'Intel: live revisable drafts':'NVIDIA: committed output only; no intermediate drafts')+' · Separate conversation per backend · Enter to send';
+  $('health').textContent='Connecting…';health();
+};
+$('form').addEventListener('submit',async e=>{
+  e.preventDefault();const prompt=$('prompt').value.trim();if(!prompt||busy)return;
+  const selected=backend;setBusy(true);$('prompt').value='';$('intro').classList.add('hidden');
+  const messages=[...histories[selected],{role:'user',content:prompt}];
+  const user=node('article','turn user');user.append(node('div','label','You'),node('div','answer',prompt));
+  const assistant=node('article','turn');assistant.append(node('div','label',selected==='intel'?'Intel Gemma / live diffusion drafts':'NVIDIA Gemma / committed stream'));
+  const details=node('details','hidden');details.open=true;details.append(node('summary','','Thinking'));
+  const reasoning=node('div','reasoning');details.append(reasoning);
+  const answer=node('div','answer');const status=node('div','status active','Preparing prompt…');const stats=node('div','stats');
+  assistant.append(details,answer,status,stats);views[selected].append(user,assistant);
+  scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'});
+  controller=new AbortController();let completed=false,finalText='';const decoder=new TextDecoder();
+  try{
+    const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backend:selected,messages,max_tokens:Number($('tokens').value),thinking:$('thinking').checked}),signal:controller.signal});
+    if(!r.ok){const err=await r.json();throw Error(typeof err.detail==='string'?err.detail:JSON.stringify(err.detail))}
+    const reader=r.body.getReader();let buffer='';
+    while(true){
+      const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let boundary;
+      while((boundary=buffer.indexOf('\n\n'))!==-1){
+        const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);if(!block.startsWith('data: '))continue;
+        const event=JSON.parse(block.slice(6));if(event.type==='error')throw Error(event.message);
+        if(event.type==='draft'||event.type==='commit'){
+          const draft=event.type==='draft';details.classList.toggle('hidden',!event.reasoning);
+          revise(reasoning,event.reasoning,draft);revise(answer,event.text,draft);
+          answer.classList.toggle('drafting',draft);answer.classList.toggle('settled',!draft);
+          status.textContent=selected==='nvidia'?`Committed stream · ${event.chunks} chunks · ${event.elapsed.toFixed(2)}s`:draft?`Denoising · step ${event.steps} · ${event.elapsed.toFixed(2)}s`:`Block committed · ${event.steps} steps`;
+          if(!draft)finalText=event.text;scrollIfNearBottom();
+        }
+        if(event.type==='done'){
+          completed=true;status.classList.remove('active');status.textContent=event.finish_reason==='length'?'Output limit reached':'Complete';answer.classList.remove('drafting');answer.classList.add('settled');
+          stats.textContent=selected==='nvidia'?`${event.elapsed.toFixed(2)}s total · first output ${event.first_output?.toFixed(2)??'—'}s · ${event.chunks} committed chunks · ${event.tokens??'unreported'} completion tokens (including thinking)`:`${event.elapsed.toFixed(2)}s total · first draft ${event.first_draft?.toFixed(2)??'—'}s · ${event.steps} draft updates · ${event.tokens} tokens before EOS · ${event.memory_gib.toFixed(2)} GiB`;
+          if(finalText)histories[selected]=[...messages,{role:'assistant',content:finalText}];scrollIfNearBottom();
+        }
+      }
+    }
+    if(!completed)throw Error('Stream ended before completion. This turn was not added to history.');
+  }catch(err){status.classList.remove('active');status.classList.add('error');status.textContent=err.name==='AbortError'?'Stopped · partial turn not added to history':`Error: ${err.message}`;answer.classList.remove('drafting')}
+  finally{controller=null;setBusy(false);$('prompt').focus();health()}
+});
+$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('form').requestSubmit()}});
+$('stop').onclick=()=>controller?.abort();
+$('clear').onclick=()=>{histories[backend]=[];views[backend].replaceChildren();$('intro').classList.remove('hidden');$('prompt').focus()};
+document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('prompt').value=b.dataset.prompt;$('prompt').focus()});
+health();setInterval(health,3000);
+</script>
+</body>
+</html>
