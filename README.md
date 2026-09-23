@@ -1,8 +1,8 @@
-# knivesysl-diffusion-xe
+# AXE-Diffusion KSL-XE
 
 a 26b-a4b block-diffusion language model served on a single intel arc pro b70 —
-one process, one model, two apis: a browser studio with live revisable drafts
-and an openai-compatible endpoint for routers and cockpits.
+one process, one model: an in-place code-editing demo, a browser studio with
+live revisable drafts, and an openai-compatible endpoint.
 
 the weights are 4-bit quantized, and the fast kernels that run them are ours:
 we wrote and fused the kernels ourselves instead of relying on generic
@@ -45,13 +45,16 @@ on top of that:
 
 ## how the server works
 
-one uvicorn process loads the model once (`load_fast`, turbo tier) onto
-`xpu:0` and serves both apis from that single instance. generation is
-identical for both: prompt → block-diffusion denoising loop → committed
-tokens, with a `draftstreamer` that emits revisable drafts as they happen and
-locks the gpu to one generation at a time.
+one uvicorn process loads `srswti/axe-diffusion-ksl-xe` once (`load_fast`, turbo
+tier) onto `xpu:0`. the loader comes from this repository's `kernels/`, mounted
+at `/app/kernels`, not from a cached upstream checkpoint. generation follows
+prompt → block-diffusion denoising → committed tokens. a `DraftStreamer` emits
+revisable drafts as they happen. a shared generation lock limits the GPU to
+one generation at a time.
 
 ```
+code editor      →  GET /edit        (selection, cursor insertion, whole file)
+editing sse      →  POST /edit       (full draft/commit snapshots, final source)
 studio ui        →  GET /            (browser: live drafts, thinking toggle)
 studio sse       →  POST /chat       (draft/commit events, per-backend history)
 openai api       →  POST /v1/chat/completions   (openai sse or json)
@@ -66,7 +69,9 @@ block: elapsed, first draft time, denoising steps.
 ## run
 
 ```bash
-./scripts/xe.sh up        # start + wait for health (model load ~18 s)
+./scripts/xe.sh up        # build AXE image if absent, fetch weights, start + wait
+./scripts/xe.sh fetch     # fetch checkpoint assets only; never overwrite kernels/
+./scripts/xe.sh restart   # reload local Python/kernel edits
 ./scripts/xe.sh status    # container + gpu + health + /v1/models
 ./scripts/xe.sh test      # api benchmark + quality battery
 ./scripts/xe.sh logs      # follow logs
@@ -74,19 +79,84 @@ block: elapsed, first draft time, denoising steps.
 ./scripts/xe.sh down      # stop
 ```
 
-env: `AXE_PORT` (8080), `AXE_IMAGE` (serving image), `SERVED_MODEL_NAME`
-(`knivesysl-diffusion-xe`), `NVIDIA_BASE_URL` (optional nvidia backend for the
-studio).
+open **http://localhost:8080/edit** for the code demo, or `/` for Studio.
+
+the image is `local/axe-diffusion-ksl-xe:triton38`. its Dockerfile uses the
+existing `local/gemma-w4-intel:tested` runtime base and installs
+`triton-xpu==3.8.0`. it embeds the server, both UIs, and kernels. compose mounts
+the workspace versions read-only, so local optimizations take effect after
+`./scripts/xe.sh restart`; no kernel re-download or image rebuild is needed.
+to refresh the embedded standalone image too, run
+`docker build -t local/axe-diffusion-ksl-xe:triton38 .`.
+
+`hf download` fetches weights, config, and tokenizer assets from
+`srswti/axe-diffusion-ksl-xe` into the HF cache. the server resolves those same
+assets offline. `AXE_REVISION` defaults to `main`; set a commit hash to pin a
+release. local `kernels/` remains authoritative in either case. to update kernel
+code from the Hub, explicitly review and download it; startup never overwrites
+your local changes.
+
+env: `AXE_PORT` (8080), `AXE_IMAGE` (serving image), `AXE_BASE_IMAGE` (build base),
+`AXE_REVISION` (main), `HF_HOME` (host HF cache root), `SERVED_MODEL_NAME`
+(`axe-diffusion-ksl-xe`), `NVIDIA_BASE_URL` (optional existing Studio proxy).
+this lifecycle is Intel XPU only; a CUDA lifecycle is not implemented yet.
 
 openai example:
 
 ```bash
-curl http://127.0.0.1:8080/v1/chat/completions -h 'content-type: application/json' -d '{
-  "model": "knivesysl-diffusion-xe",
+curl http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' -d '{
+  "model": "axe-diffusion-ksl-xe",
   "messages": [{"role":"user","content":"what is 17 times 23?"}],
   "max_tokens": 256
 }'
 ```
+
+## code-editing demo
+
+- **edit selection / insert at cursor** is the default. select an expression,
+  line, or function, or place the cursor where new text belongs. AXE generates
+  only a replacement. the server constructs `prefix + replacement + suffix`,
+  preserving all source outside the range exactly. explicit response delimiters
+  preserve indentation and trailing newlines without JSON-escaping generated code.
+- **revise whole file** is an explicit opt-in for broader changes such as adding
+  documentation throughout a file. unrelated-code preservation is prompted,
+  not guaranteed in this mode.
+- both modes show real diffusion draft snapshots in the same editor. changed
+  lines are highlighted; **review changed lines** shows removed and added text.
+  **undo**, **redo**, **copy**, prompt chips, and an output budget are available.
+- failed, cancelled, malformed, or token-exhausted responses restore the original
+  editor contents. Python final documents must parse before being committed.
+  parsing does not prove semantic correctness; other languages are not compiled
+  or syntax-validated. submitted/generated code is never executed by the server.
+
+this is instruction-conditioned generation with application-enforced edit
+boundaries, **not native masked-canvas diffusion infilling**. there is one model
+and one shared generation lock; concurrent generation receives HTTP 409.
+
+`POST /edit` accepts `code`, `instruction`, `language`, `max_tokens` (1–8192),
+and `mode` (`selection` or `whole`). selection mode also requires
+`selection_start` and `selection_end`: zero-based **Unicode code-point** offsets,
+end-exclusive. equal offsets mean insertion. the UI converts JavaScript UTF-16
+selection offsets before sending. source is limited to 100,000 characters,
+instructions to 8,000, and the tokenized edit prompt to 32,768 tokens.
+
+SSE `draft` and `commit` events carry complete candidate documents in `code`.
+only a terminal `done` event means a validated revision; `error` means retain the
+original. timings and denoising steps come from the actual generation.
+
+## editing verification
+
+```bash
+# real-tokenizer boundary, framing, cancellation, and completion regressions
+docker compose run --rm --no-deps -v "$PWD/scripts:/app/scripts:ro" xe-diffusion -m unittest scripts.test_editing -v
+# real-model selection, insertion, whole-file, busy/cancel, and error scenarios
+python3 scripts/test_edit_api.py --base http://127.0.0.1:8080
+```
+
+the live tests evaluate only restricted Python fixtures in a separate,
+resource-limited test process to check behavior. there are no mocked model
+responses. the ordinary `./scripts/xe.sh test` remains the OpenAI API benchmark
+and quality check; its thinking/token-limit lines are diagnostics, not assertions.
 
 ## measured performance (arc pro b70, triton 3.8.0 xpu)
 
@@ -103,6 +173,9 @@ not throughput-bound — the canvas is denoised whether the reply is 12 tokens
 or 250, so time-to-answer is the metric that matters conversationally.
 
 ## requirements
+
+Docker with Intel `/dev/dri` access, the existing runtime base image, the host
+`hf` CLI, and enough HF-cache disk space for the checkpoint are required.
 
 ~18 gib vram for weights, ~20 gib peak (the fp32 logits tensor alone is
 268 mib per denoising step). checkpoint format `dg-w4a16-v1`: asymmetric
